@@ -1,0 +1,238 @@
+{
+  "id": "linkedin-auto-connect-main",
+  "name": "LinkedIn Safe Outreach - Main",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-safe-outreach",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trg-webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "webhookId": "linkedin-safe-outreach"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Accept POST body shaped like { \"prospects\": [ {first_name, last_name, job_title, company_name, linkedin_url}, ... ] }\nconst body = $input.first().json.body || $input.first().json;\nconst list = Array.isArray(body) ? body : (body.prospects || []);\nif (!Array.isArray(list) || list.length === 0) {\n  throw new Error('No prospects provided. POST body must be {\"prospects\": [...]} or a JSON array.');\n}\nreturn list.map((p) => ({ json: p }));"
+      },
+      "id": "node-extract-prospects",
+      "name": "Extract Prospects",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{$json.job_title}}",
+              "rightValue": "founder|ceo|owner|co-founder|cofounder|director|head of|operations|manager",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-filter-titles",
+      "name": "Filter Decision-Makers",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "maxItems": "={{ parseInt($env.LINKEDIN_MAX_PER_RUN || '15', 10) }}"
+      },
+      "id": "node-cap",
+      "name": "Cap Per Run",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "node-split",
+      "name": "Loop Each Prospect",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const templates = [\n  (p) => `Hi ${p.first_name}, came across your profile at ${p.company_name}. Would be great to connect.`,\n  (p) => `Hi ${p.first_name}, I\\u2019m connecting with founders and operators like yourself. Happy to connect here.`,\n  (p) => `Hi ${p.first_name}, noticed your role at ${p.company_name}. Always open to connecting with people in leadership roles.`,\n  (p) => `Hi ${p.first_name}, your work at ${p.company_name} caught my eye. Would love to connect.`\n];\n\nconst item = $input.item.json;\nconst idx = Math.floor(Math.random() * templates.length);\nconst note = templates[idx](item).slice(0, 290);\n\nreturn {\n  json: {\n    ...item,\n    template_index: idx,\n    connection_note: note\n  }\n};"
+      },
+      "id": "node-personalize",
+      "name": "Pick Template & Personalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 240]
+    },
+    {
+      "parameters": {
+        "jsCode": "const url = ($input.item.json.linkedin_url || '').trim();\nconst m = url.match(/linkedin\\.com\\/in\\/([^\\/\\?#]+)/i);\nif (!m) {\n  throw new Error('Invalid linkedin_url: ' + url);\n}\nreturn { json: { ...$input.item.json, public_id: m[1] } };"
+      },
+      "id": "node-extract-id",
+      "name": "Extract Public ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.linkedin.com/voyager/api/growth/normInvitations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "accept", "value": "application/vnd.linkedin.normalized+json+2.1" },
+            { "name": "content-type", "value": "application/json; charset=UTF-8" },
+            { "name": "x-restli-protocol-version", "value": "2.0.0" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"trackingId\": \"{{ $now.toMillis() }}\",\n  \"message\": {{ JSON.stringify($json.connection_note) }},\n  \"invitee\": {\n    \"com.linkedin.voyager.growth.invitation.InviteeProfile\": {\n      \"profileId\": \"{{ $json.public_id }}\"\n    }\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json",
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "node-send-invite",
+      "name": "Send Connection Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 240],
+      "credentials": {
+        "httpCustomAuth": {
+          "id": "REPLACE_WITH_LINKEDIN_CRED_ID",
+          "name": "LinkedIn Session"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const res = $input.item.json;\nconst code = res.statusCode || 0;\nconst ok = code >= 200 && code < 300;\nconst prospect = $('Extract Public ID').item.json;\nreturn {\n  json: {\n    linkedin_url: prospect.linkedin_url,\n    public_id: prospect.public_id,\n    first_name: prospect.first_name || null,\n    last_name: prospect.last_name || null,\n    company_name: prospect.company_name || null,\n    job_title: prospect.job_title || null,\n    template_index: prospect.template_index,\n    connection_note: prospect.connection_note,\n    status: ok ? 'sent' : 'failed',\n    http_status: code,\n    reason: ok ? null : (JSON.stringify(res.body || {}).slice(0, 500))\n  }\n};"
+      },
+      "id": "node-build-log",
+      "name": "Build Log Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2040, 240]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO leads.linkedin_outreach_log\n  (linkedin_url, public_id, first_name, last_name, company_name, job_title, template_index, connection_note, status, http_status, reason)\nVALUES\n  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        "options": {
+          "queryReplacement": "={{ $json.linkedin_url }},{{ $json.public_id }},{{ $json.first_name }},{{ $json.last_name }},{{ $json.company_name }},{{ $json.job_title }},{{ $json.template_index }},{{ $json.connection_note }},{{ $json.status }},{{ $json.http_status }},{{ $json.reason }}"
+        }
+      },
+      "id": "node-log-row",
+      "name": "Insert Outreach Log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2260, 240],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CRED_ID",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const min = parseInt($env.LINKEDIN_MIN_DELAY_SEC || '60', 10);\nconst max = parseInt($env.LINKEDIN_MAX_DELAY_SEC || '180', 10);\nconst seconds = Math.floor(Math.random() * (max - min + 1)) + min;\nreturn { json: { delay_seconds: seconds } };"
+      },
+      "id": "node-pick-delay",
+      "name": "Pick Random Delay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2480, 240]
+    },
+    {
+      "parameters": {
+        "amount": "={{$json.delay_seconds}}",
+        "unit": "seconds"
+      },
+      "id": "node-wait",
+      "name": "Wait 60-180s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2700, 240],
+      "webhookId": "linkedin-outreach-wait"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{ "node": "Extract Prospects", "type": "main", "index": 0 }]]
+    },
+    "Extract Prospects": {
+      "main": [[{ "node": "Filter Decision-Makers", "type": "main", "index": 0 }]]
+    },
+    "Filter Decision-Makers": {
+      "main": [[{ "node": "Cap Per Run", "type": "main", "index": 0 }]]
+    },
+    "Cap Per Run": {
+      "main": [[{ "node": "Loop Each Prospect", "type": "main", "index": 0 }]]
+    },
+    "Loop Each Prospect": {
+      "main": [
+        [],
+        [{ "node": "Pick Template & Personalize", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pick Template & Personalize": {
+      "main": [[{ "node": "Extract Public ID", "type": "main", "index": 0 }]]
+    },
+    "Extract Public ID": {
+      "main": [[{ "node": "Send Connection Request", "type": "main", "index": 0 }]]
+    },
+    "Send Connection Request": {
+      "main": [[{ "node": "Build Log Row", "type": "main", "index": 0 }]]
+    },
+    "Build Log Row": {
+      "main": [[{ "node": "Insert Outreach Log", "type": "main", "index": 0 }]]
+    },
+    "Insert Outreach Log": {
+      "main": [[{ "node": "Pick Random Delay", "type": "main", "index": 0 }]]
+    },
+    "Pick Random Delay": {
+      "main": [[{ "node": "Wait 60-180s", "type": "main", "index": 0 }]]
+    },
+    "Wait 60-180s": {
+      "main": [[{ "node": "Loop Each Prospect", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "active": false,
+  "tags": []
+}

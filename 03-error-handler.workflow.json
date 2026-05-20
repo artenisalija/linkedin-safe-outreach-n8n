@@ -1,0 +1,60 @@
+{
+  "id": "linkedin-auto-connect-errh",
+  "name": "LinkedIn Safe Outreach - Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "err-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.item.json;\nconst wf = e.workflow || {};\nconst exec = e.execution || {};\nconst err = e.execution?.error || {};\nconst title = 'n8n error: ' + (wf.name || 'unknown');\nconst message = [\n  'Workflow: ' + (wf.name || ''),\n  'Execution: ' + (exec.id || ''),\n  'Node: ' + (err.node?.name || ''),\n  'Message: ' + (err.message || '')\n].join('\\n');\nreturn { json: { title, message } };"
+      },
+      "id": "err-build",
+      "name": "Build Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_GOTIFY_HOST/message",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": {{ JSON.stringify($json.title) }},\n  \"message\": {{ JSON.stringify($json.message) }},\n  \"priority\": 5\n}",
+        "options": {}
+      },
+      "id": "err-notify",
+      "name": "Notify Gotify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_GOTIFY_CRED_ID",
+          "name": "Gotify"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [[{ "node": "Build Notification", "type": "main", "index": 0 }]]
+    },
+    "Build Notification": {
+      "main": [[{ "node": "Notify Gotify", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}
