@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS leads.linkedin_outreach_log (
   last_name       TEXT,
   company_name    TEXT,
   job_title       TEXT,
+  country         TEXT,
+  country_tier    TEXT,
   template_index  INT,
   connection_note TEXT,
   status          TEXT NOT NULL CHECK (status IN ('sent', 'failed', 'skipped')),

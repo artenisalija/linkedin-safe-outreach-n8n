@@ -57,13 +57,23 @@
     },
     {
       "parameters": {
+        "jsCode": "// Country filter + priority sort.\n// Priority (English-proficient, user-defined): MT, GB/UK, DE, FR, NL, SE, NO, DK, FI\n// Secondary (other EU/EEA): AT BE BG HR CY CZ EE GR HU IS IE IT LV LI LT LU PL PT RO SK SI ES CH (Switzerland not EU/EEA but treat as secondary)\n// Anything else: dropped.\n\nconst PRIORITY = new Set(['MT','MALTA','GB','UK','UNITED KINGDOM','GREAT BRITAIN','ENGLAND','SCOTLAND','WALES','NORTHERN IRELAND','DE','GERMANY','DEUTSCHLAND','FR','FRANCE','NL','NETHERLANDS','HOLLAND','SE','SWEDEN','NO','NORWAY','DK','DENMARK','FI','FINLAND']);\n\nconst SECONDARY = new Set(['AT','AUSTRIA','BE','BELGIUM','BG','BULGARIA','HR','CROATIA','CY','CYPRUS','CZ','CZECH REPUBLIC','CZECHIA','EE','ESTONIA','GR','GREECE','HU','HUNGARY','IS','ICELAND','IE','IRELAND','IT','ITALY','LV','LATVIA','LI','LIECHTENSTEIN','LT','LITHUANIA','LU','LUXEMBOURG','PL','POLAND','PT','PORTUGAL','RO','ROMANIA','SK','SLOVAKIA','SI','SLOVENIA','ES','SPAIN','CH','SWITZERLAND']);\n\nconst norm = (s) => String(s || '').trim().toUpperCase();\n\nconst tier = (c) => {\n  const n = norm(c);\n  if (!n) return 99;\n  if (PRIORITY.has(n)) return 0;\n  if (SECONDARY.has(n)) return 1;\n  return 99;\n};\n\nconst items = $input.all()\n  .map((it) => ({ ...it, _tier: tier(it.json.country) }))\n  .filter((it) => it._tier < 99)\n  .sort((a, b) => a._tier - b._tier);\n\nreturn items.map((it) => ({\n  json: { ...it.json, country_tier: it._tier === 0 ? 'priority' : 'secondary' }\n}));"
+      },
+      "id": "node-country-filter",
+      "name": "Filter EU + Priority Sort",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 300]
+    },
+    {
+      "parameters": {
         "maxItems": "={{ parseInt($env.LINKEDIN_MAX_PER_RUN || '15', 10) }}"
       },
       "id": "node-cap",
       "name": "Cap Per Run",
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
-      "position": [900, 300]
+      "position": [1000, 300]
     },
     {
       "parameters": {
@@ -129,14 +139,14 @@
       "position": [1800, 240],
       "credentials": {
         "httpCustomAuth": {
-          "id": "REPLACE_WITH_LINKEDIN_CRED_ID",
+          "id": "linkedin-session-cred",
           "name": "LinkedIn Session"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const res = $input.item.json;\nconst code = res.statusCode || 0;\nconst ok = code >= 200 && code < 300;\nconst prospect = $('Extract Public ID').item.json;\nreturn {\n  json: {\n    linkedin_url: prospect.linkedin_url,\n    public_id: prospect.public_id,\n    first_name: prospect.first_name || null,\n    last_name: prospect.last_name || null,\n    company_name: prospect.company_name || null,\n    job_title: prospect.job_title || null,\n    template_index: prospect.template_index,\n    connection_note: prospect.connection_note,\n    status: ok ? 'sent' : 'failed',\n    http_status: code,\n    reason: ok ? null : (JSON.stringify(res.body || {}).slice(0, 500))\n  }\n};"
+        "jsCode": "const res = $input.item.json;\nconst code = res.statusCode || 0;\nconst ok = code >= 200 && code < 300;\nconst prospect = $('Extract Public ID').item.json;\nreturn {\n  json: {\n    linkedin_url: prospect.linkedin_url,\n    public_id: prospect.public_id,\n    first_name: prospect.first_name || null,\n    last_name: prospect.last_name || null,\n    company_name: prospect.company_name || null,\n    job_title: prospect.job_title || null,\n    country: prospect.country || null,\n    country_tier: prospect.country_tier || null,\n    template_index: prospect.template_index,\n    connection_note: prospect.connection_note,\n    status: ok ? 'sent' : 'failed',\n    http_status: code,\n    reason: ok ? null : (JSON.stringify(res.body || {}).slice(0, 500))\n  }\n};"
       },
       "id": "node-build-log",
       "name": "Build Log Row",
@@ -147,9 +157,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO leads.linkedin_outreach_log\n  (linkedin_url, public_id, first_name, last_name, company_name, job_title, template_index, connection_note, status, http_status, reason)\nVALUES\n  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        "query": "INSERT INTO leads.linkedin_outreach_log\n  (linkedin_url, public_id, first_name, last_name, company_name, job_title, country, country_tier, template_index, connection_note, status, http_status, reason)\nVALUES\n  ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         "options": {
-          "queryReplacement": "={{ $json.linkedin_url }},{{ $json.public_id }},{{ $json.first_name }},{{ $json.last_name }},{{ $json.company_name }},{{ $json.job_title }},{{ $json.template_index }},{{ $json.connection_note }},{{ $json.status }},{{ $json.http_status }},{{ $json.reason }}"
+          "queryReplacement": "={{ $json.linkedin_url }},{{ $json.public_id }},{{ $json.first_name }},{{ $json.last_name }},{{ $json.company_name }},{{ $json.job_title }},{{ $json.country }},{{ $json.country_tier }},{{ $json.template_index }},{{ $json.connection_note }},{{ $json.status }},{{ $json.http_status }},{{ $json.reason }}"
         }
       },
       "id": "node-log-row",
@@ -159,8 +169,8 @@
       "position": [2260, 240],
       "credentials": {
         "postgres": {
-          "id": "REPLACE_WITH_POSTGRES_CRED_ID",
-          "name": "Postgres"
+          "id": "cred-postgres-leadgen",
+          "name": "Leadgen PostgreSQL"
         }
       }
     },
@@ -195,6 +205,9 @@
       "main": [[{ "node": "Filter Decision-Makers", "type": "main", "index": 0 }]]
     },
     "Filter Decision-Makers": {
+      "main": [[{ "node": "Filter EU + Priority Sort", "type": "main", "index": 0 }]]
+    },
+    "Filter EU + Priority Sort": {
       "main": [[{ "node": "Cap Per Run", "type": "main", "index": 0 }]]
     },
     "Cap Per Run": {
