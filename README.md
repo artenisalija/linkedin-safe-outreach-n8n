@@ -1,21 +1,41 @@
-# LinkedIn Safe Outreach — n8n workflow
+# LinkedIn Safe Outreach
 
-A small, human-paced LinkedIn connection-request workflow for n8n. Pulls a list of prospects from a webhook, filters to decision-makers, rotates 4 connection-note templates, sends invites with randomized 60–180s delays, and logs every outcome to Postgres.
+A low-volume, human-like LinkedIn connection request workflow built in n8n. Designed for founders/operators who want to start genuine conversations about automation — without triggering LinkedIn's anti-spam systems.
 
-Built to stay inside LinkedIn's anti-spam radar — low volume, varied messaging, no aggressive automation.
+## What it does
 
-## What's in here
+1. Receives a JSON list of prospects via webhook.
+2. Filters down to decision-makers (Founder / CEO / Owner / Director / Head of / Operations / Manager).
+3. Generates a short, natural connection note by randomly rotating between 4 templates.
+4. Sends one connection request per execution step via LinkedIn's voyager API.
+5. Waits a randomized 60–180 seconds between requests.
+6. Caps the run at a configurable max (default 15 prospects).
+7. Logs every outcome (sent / failed) to Postgres table `leads.linkedin_outreach_log`.
 
-| File | Purpose |
-|------|---------|
-| `01-create-table.sql` | Postgres log table |
-| `02-linkedin-safe-outreach.workflow.json` | Main workflow (webhook trigger → filter → send → log → delay) |
-| `03-error-handler.workflow.json` | Generic error handler that pings Gotify |
+## How it helps a business
 
-## Webhook payload
+- **Compliant outreach.** Mimics human pacing so the LinkedIn account stays healthy.
+- **Quality over quantity.** 10–20 carefully personalized touches per day outperform mass spam in reply rate.
+- **Auditable.** Every send is logged with timestamp, profile URL, template used, HTTP status, and failure reason.
+- **Reusable.** POST any list to the webhook — same workflow handles any vertical or campaign.
 
-`POST /webhook/linkedin-safe-outreach`
+## Customer / user journey
 
+1. Operator prepares a JSON list of 10–20 fresh leads.
+2. Operator POSTs them to the webhook URL.
+3. Workflow filters out irrelevant titles.
+4. For each qualified prospect, the workflow:
+   - Rotates a template, fills in name/company.
+   - Sends the connection request.
+   - Logs the result to Postgres.
+   - Waits 60–180s.
+5. Operator queries `leads.linkedin_outreach_log` for daily review. Replies are handled manually in LinkedIn — this workflow does not auto-reply.
+
+## Webhook input format
+
+`POST https://YOUR_N8N_HOST/webhook/linkedin-safe-outreach`
+
+Body:
 ```json
 {
   "prospects": [
@@ -24,55 +44,88 @@ Built to stay inside LinkedIn's anti-spam radar — low volume, varied messaging
       "last_name": "Doe",
       "job_title": "Founder",
       "company_name": "Acme Co",
-      "linkedin_url": "https://www.linkedin.com/in/janedoe/"
+      "linkedin_url": "https://www.linkedin.com/in/janedoe/",
+      "country": "Germany"
     }
   ]
 }
 ```
 
-## How it works
+A bare array `[ {...}, {...} ]` also works.
 
-1. **Webhook Trigger** receives the prospects array.
-2. **Filter** keeps only profiles whose `job_title` matches Founder / CEO / Owner / Co-Founder / Director / Head of / Operations / Manager.
-3. **Cap Per Run** trims to `LINKEDIN_MAX_PER_RUN` (default 15).
-4. **Loop Each Prospect** iterates one prospect at a time.
-5. **Pick Template & Personalize** randomly selects one of 4 connection-note templates and fills in the prospect's name + company. Notes are capped at 290 characters.
-6. **Extract Public ID** parses the LinkedIn URL into a profile handle.
-7. **Send Connection Request** calls LinkedIn's voyager API with the user's session cookies (configured via an HTTP Custom Auth credential). `neverError: true` so failures still flow through to the log step.
-8. **Build Log Row** prepares the outcome record.
-9. **Insert Outreach Log** writes to `leads.linkedin_outreach_log` via a parameterized Postgres query.
-10. **Pick Random Delay** chooses a delay between `LINKEDIN_MIN_DELAY_SEC` (60) and `LINKEDIN_MAX_DELAY_SEC` (180) seconds.
-11. **Wait** holds for the delay, then loops back.
+## Country filter
 
-## Credentials you'll need to wire
+The workflow only sends to EU/EEA prospects, in two tiers:
 
-Open the workflow in the n8n UI and replace each placeholder credential reference with one from your instance:
+- **Priority (sent first):** Malta, United Kingdom, Germany, France, Netherlands, Sweden, Norway, Denmark, Finland — chosen for high English proficiency.
+- **Secondary (sent after priority):** all other EU + EEA + Switzerland (Austria, Belgium, Bulgaria, Croatia, Cyprus, Czechia, Estonia, Greece, Hungary, Iceland, Ireland, Italy, Latvia, Liechtenstein, Lithuania, Luxembourg, Poland, Portugal, Romania, Slovakia, Slovenia, Spain, Switzerland).
+- **Everything else** (including prospects with a blank `country` field) is dropped before sending.
 
-- **LinkedIn Session** (HTTP Custom Auth) — your `li_at` and `JSESSIONID` cookies plus matching `csrf-token` header.
-- **Postgres** — for the log table.
-- **Gotify** (HTTP Header Auth) — only used by the error handler.
+`country` accepts full names ("Germany", "United Kingdom") or ISO codes ("DE", "GB", "UK") — case-insensitive. The chosen tier ends up in the Postgres log as `country_tier` (`priority` or `secondary`).
 
-## Environment variables (optional)
+## Required credentials, APIs, and env vars
 
-| Var | Default |
-|-----|---------|
-| `LINKEDIN_MAX_PER_RUN` | 15 |
-| `LINKEDIN_MIN_DELAY_SEC` | 60 |
-| `LINKEDIN_MAX_DELAY_SEC` | 180 |
+### Credentials (configured in n8n)
 
-## Import
+| Name in n8n          | Type                  | Used for                          | Status |
+|----------------------|-----------------------|-----------------------------------|--------|
+| `LinkedIn Session`   | HTTP Custom Auth      | Sending connection requests       | ✅ created |
+| `Leadgen PostgreSQL` | Postgres              | Writing to outreach log table     | ✅ existing |
+| `Gotify`             | HTTP Header Auth      | Error notifications               | ⚠️ needed for error handler |
 
-```bash
-n8n import:workflow --input=02-linkedin-safe-outreach.workflow.json
-n8n import:workflow --input=03-error-handler.workflow.json
+### Environment variables (read by the workflow via `$env`)
+
+Add to `/opt/leadgen-stack/.env` then restart `leadgen-n8n`:
+
+| Var                          | Default | Purpose                              |
+|------------------------------|---------|--------------------------------------|
+| `LINKEDIN_MAX_PER_RUN`       | `15`    | Hard cap on requests per execution   |
+| `LINKEDIN_MIN_DELAY_SEC`     | `60`    | Lower bound on inter-request delay   |
+| `LINKEDIN_MAX_DELAY_SEC`     | `180`   | Upper bound on inter-request delay   |
+| `GOTIFY_URL`                 | —       | Notification endpoint (for error handler) |
+
+Defaults work without the env vars — they only override the built-in safety knobs.
+
+## Database
+
+Postgres table `leads.linkedin_outreach_log` on `leadgen-postgres / appointments`. Schema in [01-create-table.sql](01-create-table.sql). Already created.
+
+Query the log:
+```sql
+SELECT ts, first_name, company_name, status, http_status, reason
+FROM leads.linkedin_outreach_log
+ORDER BY ts DESC
+LIMIT 50;
 ```
 
-Each JSON includes a top-level `id` field, which n8n v2+ requires for CLI import.
+## Files in this package
+
+- `01-create-table.sql` — Postgres log table
+- `02-linkedin-safe-outreach.workflow.json` — main outreach workflow
+- `03-error-handler.workflow.json` — Gotify error handler (attach as Error Workflow)
+- `04-lead-discovery.workflow.json` — optional lead generator (DuckDuckGo → JSON → outreach webhook)
+- `docs/SETUP_WALKTHROUGH.md` — step-by-step bring-up
+- `docs/TESTING_WORKFLOW.md` — how to dry-run before going live
+
+## Optional companion: Lead Discovery (workflow #4)
+
+A second workflow `LinkedIn Lead Discovery` that finds prospects on its own and POSTs them to the outreach webhook.
+
+**How it works:**
+1. Builds a Google-style query per priority country: `site:linkedin.com/in/ ("founder" OR "CEO" OR "owner" OR "managing director") "<country>"`
+2. Runs it through DuckDuckGo HTML search (no API key, no signup, free)
+3. Parses results into `{first_name, last_name, job_title, company_name, linkedin_url, country}` records
+4. De-duplicates against `leads.linkedin_outreach_log` so already-contacted profiles are skipped
+5. Aggregates the survivors into `{"prospects":[...]}`
+6. POSTs to the outreach webhook → outreach workflow filters/paces/sends
+
+**Tunable:** env var `DISCOVERY_PER_COUNTRY` (default 3) controls how many results to keep per country per run. With the default priority list of 9 countries, expect ~10–25 usable prospects per run after parsing + de-duping.
+
+**Caveats:**
+- Result quality varies — DDG snippets aren't structured data. Some prospects will land with `company_name=''` or a noisy `job_title`. The outreach filter drops anything not matching the decision-maker regex, so noise is contained.
+- Hits DDG nicely with a 4-second pause between countries; safe to run a few times a day.
+- For higher quality, swap the DuckDuckGo node for SerpAPI / Brave Search API — same shape, just a different HTTP call.
 
 ## Design principle
 
-This is intentionally **low-volume**. 10–20 personalized invites per day will outperform any bulk LinkedIn tool over a 90-day window, and they won't get the sending account restricted.
-
-## License
-
-MIT
+Intentionally **minimal and human-like**. Not built to scale to thousands of sends — that is a feature. LinkedIn's restrictions are unforgiving; a 15/day cadence with personalization will outperform any bulk tool over a 90-day window.

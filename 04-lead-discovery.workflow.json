@@ -1,0 +1,360 @@
+{
+  "id": "linkedin-auto-connect-discovery",
+  "name": "LinkedIn Lead Discovery",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trg-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Configure search here. Each entry produces one DuckDuckGo query.\n// Rotates priority EU countries; adjust the roles list to widen/narrow targeting.\nconst countries = ['Germany','Netherlands','France','Sweden','Denmark','Finland','Norway','United Kingdom','Malta'];\nconst rolesGroup = '(\"founder\" OR \"CEO\" OR \"owner\" OR \"co-founder\" OR \"managing director\")';\nconst maxPerCountry = parseInt($env.DISCOVERY_PER_COUNTRY || '3', 10);\n\nreturn countries.map((c) => ({\n  json: {\n    country: c,\n    query: `site:linkedin.com/in/ ${rolesGroup} \"${c}\"`,\n    max_results: maxPerCountry\n  }\n}));"
+      },
+      "id": "node-build-queries",
+      "name": "Build Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "node-loop",
+      "name": "Loop Each Country",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://html.duckduckgo.com/html/?q={{ encodeURIComponent($json.query) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "user-agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "neverError": true,
+              "fullResponse": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "node-search",
+      "name": "DuckDuckGo Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse DDG HTML results, extract LinkedIn /in/ profile URLs + linked text.\nconst html = $input.item.json.body || '';\nconst country = $('Loop Each Country').item.json.country;\nconst maxResults = $('Loop Each Country').item.json.max_results;\n\n// DDG results look like:\n//   <a rel=\"nofollow\" class=\"result__a\" href=\"//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.linkedin.com%2Fin%2Fjane-doe-1234%2F&...\">Jane Doe - CEO at Acme - LinkedIn</a>\nconst re = /<a[^>]*class=\\\"result__a\\\"[^>]*href=\\\"([^\\\"]+)\\\"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n\nconst out = [];\nconst seen = new Set();\nlet m;\nwhile ((m = re.exec(html)) !== null) {\n  if (out.length >= maxResults) break;\n  let href = m[1];\n  const text = m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&#x27;/g,\"'\").trim();\n\n  // DDG wraps real URL in uddg= param\n  const uddg = href.match(/[?&]uddg=([^&]+)/);\n  if (uddg) href = decodeURIComponent(uddg[1]);\n\n  // Only LinkedIn personal profiles\n  if (!/linkedin\\.com\\/in\\//i.test(href)) continue;\n  // Normalize\n  const norm = href.split('?')[0].replace(/\\/+$/, '');\n  if (seen.has(norm)) continue;\n  seen.add(norm);\n\n  // Parse \"First Last - Job at Company - LinkedIn\" style text\n  let firstName = '', lastName = '', jobTitle = '', companyName = '';\n  const parts = text.split(/\\s+[-\u00e2\u20ac\u201c|\u00c2\u00b7]\\s+/).map((s) => s.trim()).filter(Boolean);\n  // First chunk is usually the name (drop trailing \"- LinkedIn\")\n  const cleaned = parts.filter((p) => !/^linkedin$/i.test(p));\n  if (cleaned.length >= 1) {\n    const nameToks = cleaned[0].split(/\\s+/).filter(Boolean);\n    firstName = nameToks[0] || '';\n    lastName = nameToks.slice(1).join(' ') || '';\n  }\n  if (cleaned.length >= 2) {\n    // Try \"Job at Company\" or \"Job @ Company\"\n    const second = cleaned[1];\n    const at = second.split(/\\s+(?:at|@)\\s+/i);\n    if (at.length === 2) {\n      jobTitle = at[0].trim();\n      companyName = at[1].trim();\n    } else {\n      jobTitle = second;\n    }\n  }\n  if (!companyName && cleaned.length >= 3) companyName = cleaned[2];\n\n  if (!firstName || !/linkedin\\.com\\/in\\//.test(norm)) continue;\n\n  out.push({\n    json: {\n      first_name: firstName,\n      last_name: lastName,\n      job_title: jobTitle || 'Founder',\n      company_name: companyName || '',\n      linkedin_url: norm,\n      country\n    }\n  });\n}\nreturn out;"
+      },
+      "id": "node-parse",
+      "name": "Parse Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 1 FROM leads.linkedin_outreach_log WHERE linkedin_url = $1 LIMIT 1",
+        "options": {
+          "queryReplacement": "={{ $json.linkedin_url }}"
+        }
+      },
+      "id": "node-dedupe-check",
+      "name": "Already Contacted?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1300,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_WITH_POSTGRES_CRED_ID",
+          "name": "Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-new",
+              "leftValue": "={{ $json[\"?column?\"] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-filter-new",
+      "name": "Keep Only New",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        1520,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// At this point each item is the dedupe SELECT result merged with prospect via pairedItem.\n// Pull the prospect from the upstream 'Parse Results' node by pairedItem index.\nconst out = [];\nfor (let i = 0; i < $input.all().length; i++) {\n  const prospect = $('Parse Results').all()[i];\n  if (prospect) out.push(prospect);\n}\nreturn out;"
+      },
+      "id": "node-restore-prospect",
+      "name": "Restore Prospect Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 4,
+        "unit": "seconds"
+      },
+      "id": "node-throttle",
+      "name": "Throttle Between Searches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1960,
+        240
+      ],
+      "webhookId": "linkedin-discovery-throttle"
+    },
+    {
+      "parameters": {},
+      "id": "node-merge",
+      "name": "Collect All",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate all prospects from every iteration into a single { prospects: [...] } payload.\nconst all = $input.all().map((it) => it.json);\nreturn [{ json: { prospects: all, count: all.length } }];"
+      },
+      "id": "node-aggregate",
+      "name": "Aggregate Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_N8N_HOST/webhook/linkedin-safe-outreach",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "node-forward",
+      "name": "Send to Outreach Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Search Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Search Queries": {
+      "main": [
+        [
+          {
+            "node": "Loop Each Country",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Each Country": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DuckDuckGo Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DuckDuckGo Search": {
+      "main": [
+        [
+          {
+            "node": "Parse Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Results": {
+      "main": [
+        [
+          {
+            "node": "Already Contacted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Contacted?": {
+      "main": [
+        [
+          {
+            "node": "Keep Only New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Only New": {
+      "main": [
+        [
+          {
+            "node": "Restore Prospect Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore Prospect Fields": {
+      "main": [
+        [
+          {
+            "node": "Throttle Between Searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Throttle Between Searches": {
+      "main": [
+        [
+          {
+            "node": "Collect All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All": {
+      "main": [
+        [
+          {
+            "node": "Loop Each Country",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Payload": {
+      "main": [
+        [
+          {
+            "node": "Send to Outreach Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "active": false,
+  "tags": []
+}
