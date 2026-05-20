@@ -13,7 +13,10 @@
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
-      "position": [200, 300],
+      "position": [
+        200,
+        300
+      ],
       "webhookId": "linkedin-safe-outreach"
     },
     {
@@ -24,7 +27,10 @@
       "name": "Extract Prospects",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 300]
+      "position": [
+        440,
+        300
+      ]
     },
     {
       "parameters": {
@@ -53,7 +59,10 @@
       "name": "Filter Decision-Makers",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2.2,
-      "position": [680, 300]
+      "position": [
+        680,
+        300
+      ]
     },
     {
       "parameters": {
@@ -63,7 +72,10 @@
       "name": "Filter EU + Priority Sort",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [780, 300]
+      "position": [
+        780,
+        300
+      ]
     },
     {
       "parameters": {
@@ -73,7 +85,10 @@
       "name": "Cap Per Run",
       "type": "n8n-nodes-base.limit",
       "typeVersion": 1,
-      "position": [1000, 300]
+      "position": [
+        1000,
+        300
+      ]
     },
     {
       "parameters": {
@@ -83,7 +98,10 @@
       "name": "Loop Each Prospect",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [1120, 300]
+      "position": [
+        1120,
+        300
+      ]
     },
     {
       "parameters": {
@@ -93,7 +111,10 @@
       "name": "Pick Template & Personalize",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1360, 240]
+      "position": [
+        1360,
+        240
+      ]
     },
     {
       "parameters": {
@@ -103,7 +124,10 @@
       "name": "Extract Public ID",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1580, 240]
+      "position": [
+        1580,
+        240
+      ]
     },
     {
       "parameters": {
@@ -114,9 +138,18 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "accept", "value": "application/vnd.linkedin.normalized+json+2.1" },
-            { "name": "content-type", "value": "application/json; charset=UTF-8" },
-            { "name": "x-restli-protocol-version", "value": "2.0.0" }
+            {
+              "name": "accept",
+              "value": "application/vnd.linkedin.normalized+json+2.1"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json; charset=UTF-8"
+            },
+            {
+              "name": "x-restli-protocol-version",
+              "value": "2.0.0"
+            }
           ]
         },
         "sendBody": true,
@@ -136,10 +169,13 @@
       "name": "Send Connection Request",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1800, 240],
+      "position": [
+        1800,
+        240
+      ],
       "credentials": {
         "httpCustomAuth": {
-          "id": "linkedin-session-cred",
+          "id": "REPLACE_WITH_LINKEDIN_CRED_ID",
           "name": "LinkedIn Session"
         }
       }
@@ -152,7 +188,10 @@
       "name": "Build Log Row",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2040, 240]
+      "position": [
+        2040,
+        240
+      ]
     },
     {
       "parameters": {
@@ -166,11 +205,14 @@
       "name": "Insert Outreach Log",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [2260, 240],
+      "position": [
+        2260,
+        240
+      ],
       "credentials": {
         "postgres": {
-          "id": "cred-postgres-leadgen",
-          "name": "Leadgen PostgreSQL"
+          "id": "REPLACE_WITH_POSTGRES_CRED_ID",
+          "name": "Postgres"
         }
       }
     },
@@ -182,7 +224,10 @@
       "name": "Pick Random Delay",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2480, 240]
+      "position": [
+        2480,
+        240
+      ]
     },
     {
       "parameters": {
@@ -193,52 +238,157 @@
       "name": "Wait 60-180s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [2700, 240],
+      "position": [
+        2700,
+        240
+      ],
       "webhookId": "linkedin-outreach-wait"
     }
   ],
   "connections": {
     "Webhook Trigger": {
-      "main": [[{ "node": "Extract Prospects", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Extract Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Extract Prospects": {
-      "main": [[{ "node": "Filter Decision-Makers", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Filter Decision-Makers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Filter Decision-Makers": {
-      "main": [[{ "node": "Filter EU + Priority Sort", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Filter EU + Priority Sort",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Filter EU + Priority Sort": {
-      "main": [[{ "node": "Cap Per Run", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Cap Per Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Cap Per Run": {
-      "main": [[{ "node": "Loop Each Prospect", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Loop Each Prospect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Loop Each Prospect": {
       "main": [
         [],
-        [{ "node": "Pick Template & Personalize", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Pick Template & Personalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Pick Template & Personalize": {
-      "main": [[{ "node": "Extract Public ID", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Extract Public ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Extract Public ID": {
-      "main": [[{ "node": "Send Connection Request", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Send Connection Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Send Connection Request": {
-      "main": [[{ "node": "Build Log Row", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Build Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Build Log Row": {
-      "main": [[{ "node": "Insert Outreach Log", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Insert Outreach Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Insert Outreach Log": {
-      "main": [[{ "node": "Pick Random Delay", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Pick Random Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Pick Random Delay": {
-      "main": [[{ "node": "Wait 60-180s", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Wait 60-180s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Wait 60-180s": {
-      "main": [[{ "node": "Loop Each Prospect", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Loop Each Prospect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
